@@ -1,0 +1,1039 @@
+---
+title: "Crime in Los Angeles from 2010-2019"
+author: "Yanhong Han"
+date: "`r Sys.Date()`"
+output:
+  html_notebook: 
+    toc: yes
+    toc_depth: 5
+  pdf_document:
+    toc: yes
+    toc_depth: 5
+editor_options:
+  chunk_output_type: inline
+---
+  
+###1. Executive Summary  
+####1.1 Dataset
+In this project, I am analyzing the crime incidents that committed in Los Angeles, California from 2010 to 2019 (present). The dataset can be downloaded from https://data.lacity.org/A-Safe-City/Crime-Data-from-2010-to-Present/y8tr-7khq. The original data set contains 1942338 observations and 26 variables.  
+
+####1.2 Goal  
+My goal is to analyze the dataset and give the readers some ideas about which locations or time period crimes occurred most frequently, which age/race/gender are the most dangerous victim groups, if there are trends existed in crimes, etc.
+
+####1.3 Assumptions  
+In the dataset, the victim ages range from negative numbers to 99 years old. I assume the victims are all individuals from 1 year old to 99 years old.
+
+####1.4 Results  
+After exploring the dataset, I found there is a seasonal pattern in crimes committed, before July, crimes decreased in odd months but increased in even months, however, after september, crimes increased in odd months and decreased in even months.  
+  
+12am is the time period most of the crimes committed, especially for theft crimes. 5am is the time period least of the crimes committed.    
+  
+People aged from 25 to 50 years old is the group that most likely to be targeted as a victim. The average age of the female victims is lower than that of male victims which means young women are more likely to be targeted.   
+  
+40.34% of the crimes occurred on Hispanic/Latino race group, however, Hispanic/Latino group accounts for most of the population in Los Angeles. According to the percentage of the population of different races, Native Hawaiian/Other Paciic Islander is the group has the highest infringement rate compared to its population rate. Asian group has the lowest infringement rate with comparison to its population rate.  
+  
+Female Black/African American or Hispanic/Latino are more likely to be targeted than male in their own race group. The opposite for Native Hawaiian/Other Pacific Islaner or White race group.  
+  
+77th Street, Southeast and Rampart are the top three places female got attacked. 77th Street, Southeast, Southwest and Central are the top four places male got attacked.  
+  
+For female, intimate partner-simple assault is an important crime type committed to them especially in single family dwelling or multiunit dwellings.  
+
+####1.5 Conclusion 
+After the analysis of the dataset, we can make a conclusion that __Longitude, Latitude__ which represent locations are the most important factors that determine the __Victim Race__. Although Hispanic/Latino accounts for most of the population in LA, I recommend them to spread their locations to decrease the chance to be targeted as a victim.  
+People should pay more attention to personal belongings at __12am__ because this is the time period most of the __theft crimes__ committed.  
+Also, __Crime Category__ is an important indicator that will affect the __Victim Age__. The most important crime category is __Child Crime__ among the 138 levels of the crime categories, people should pay more attention to children's safety to protect them from being abused or stolen, and the communities should also be alert by some red flags come from the parents.  
+Female and Male both should avoid areas such as __77th Street, Southeast__ because these two are the most dangerous places that most of the crimes committed in the past ten years.   
+
+####1.6 Out of Scope  
+The dataset only contains crime data that the crimes have occurred in this district. The information of the total number of residents, the distribution of the race/age/gender of total residents are not included in the dataset. Therefore, the analysis of this project is based on crimes have committed, the relative crime rate of each race/age/gender is not included in this report.  
+
+
+
+```{r install, results='hide', echo = FALSE}
+packages <- c("tinytex",'tidyverse','data.table','stringr','shiny',"dplyr","ggplot2",
+              "scales","fpp2","caret","MASS","forecast","e1071","corrplot","lubridate",
+              "gridExtra","urca","DT","glmnet","fastDummies","gains","rpart","rpart.plot",
+              "knitr")
+for (pack in packages){
+  if(pack %in% rownames(installed.packages()) == FALSE) {
+    install.packages(pack)
+    }
+}
+```
+
+
+```{r packages, echo = FALSE, results='hide'}
+library(knitr)
+library(tinytex)
+library(tidyverse)
+library(data.table)
+library(stringr)
+library(shiny)
+library(dplyr)
+library(ggplot2)
+library(scales)
+library(fpp2)
+library(caret)
+library(MASS)
+library(forecast)
+library(e1071)
+library(corrplot)
+library(lubridate)
+library(gridExtra)
+library(urca)
+library(DT)
+library(glmnet)
+library(fastDummies)
+library(gains)
+library(rpart)
+library(rpart.plot)
+```
+***
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval = TRUE, echo = FALSE)
+```
+
+__Dataset Structure__
+```{r download, results='hide', echo = FALSE}
+lacrime.df <- fread("Crime_Data_from_2010_to_Present.csv")
+```
+
+```{r summary, echo = FALSE}
+#summary(lacrime.df)
+str(lacrime.df)
+```
+***
+
+###2. Dataset Cleansing  
+####2.1 Remove missing values  
+In the dataset, columns (MO Codes,Weapon Used Code,Weapon Description,Crime Code 2-4,Cross Stree) have more than 90% of the missing values, those columns will not contribute too much for the analysis, so I removed those variables. Then the missing values are removed as well.   
+```{r removenull, results='hide', echo = FALSE}
+lacrime.df[lacrime.df=='' | lacrime.df=='N/A'] <- NA
+sapply(lacrime.df, function(x) sum(is.na(x)))
+
+lacrime1.df <- lacrime.df[,c(-10,-16,-17,-21,-22,-23,-25)]
+lacrime1.df <- na.omit(lacrime1.df)
+```
+
+####2.2 Remove duplicate variable  
+Variable 'Crime Code' and 'Crime Code 1' have 99% of the same values, so I omitted the rows that have different values, and removed variable 'Crime Code 1' after removing the different values.    
+  
+_--- Table of the different crime code count (0 represent different, 1 represent same)_
+```{r crimecode1, echo = FALSE}
+lacrime1.df$`Crime Code` <- as.numeric(lacrime1.df$`Crime Code`)
+lacrime1.df$count <- ifelse(lacrime1.df$`Crime Code`==lacrime1.df$`Crime Code 1`, 1, 0)
+table(lacrime1.df$count)
+
+lacrime1.df$count[lacrime1.df$count==0] <- NA
+lacrime1.df <- na.omit(lacrime1.df)
+
+lacrime1.df <- lacrime1.df[, c(-17,-20)]
+```
+
+####2.3 Create new variable Latitude and Longitude   
+The Location variable is seperated into variables Longitude and Latitude. The two variables are used to plot map or make prediction in later analysis.  
+```{r location, results='hide', echo = FALSE}
+lacrime1.df$Location[lacrime1.df$Location == "(0, 0)"] <- NA
+lacrime1.df <- na.omit(lacrime1.df)
+
+lacrime1.df$Location <- gsub("[()]", "", lacrime1.df$Location)
+
+location.df <- str_split_fixed(lacrime1.df$Location, ',', 2)
+lacrime1.df$Longitude <- location.df[,2]
+lacrime1.df$Latitude <- location.df[,1]
+names(lacrime1.df)
+lacrime1.df <- lacrime1.df[,-18]
+```
+
+####2.4 Manipulate data type  
+The variables are converted into appropriate data type.  
+
+ * The column 'DR_Number' contains unformatted values, the values should be formatted as 'yy-aa-xxxxx' (yy - 2 digit year, aa - 2 area code, xxxxx - 5 digits). e.g. 100112345  
+* Convert 'TimeOccurred' into 24-hour time range  
+* Convert categorical variables into factors   
+* Victims whose gender are neither Female nor Male are categorized as 'Unknown'  
+* Victim race are categorized into 7 common race groups  
+* Convert latitude and longtitude into continuous variables
+* Remove the observations with victim ages smaller than 0  
+```{r datatype, echo = FALSE}
+# rename the columns
+colnames(lacrime1.df) <- c("DR_Number","DateReported","DateOccurred","TimeOccured",
+                           "AreaID","AreaName","ReportingDistrict","CrimeCode",
+                           "CrimeCodeDesc","VictimAge","VictimSex","VictimDescent",
+                           "PremiseCode","PremiseDesc","StatusCode","StatusDesc",
+                           "Address","Longitude","Latitude")
+
+# a function which can extract the right n characters in a string
+substrRight <- function(x, n){
+  substr(x, nchar(x)-n+1, nchar(x))
+}
+
+# the column DR_Number contains unformatted values, the values should be formatted as 'yy-aa-xxxxx' (yy-2 digit year, aa-2 area code, xxxxx-5 digits) 
+lacrime1.df$DR_Number <- paste(substr(lacrime1.df$DateReported,
+                                      str_length(lacrime1.df$DateReported)-1,
+                                      str_length(lacrime1.df$DateReported)), 
+                               ifelse(lacrime1.df$AreaID >= 10,lacrime1.df$AreaID, 
+                                      paste('0',lacrime1.df$AreaID, sep = "")), 
+                               substrRight(lacrime1.df$DR_Number,5), sep = "")
+
+lacrime1.df$DateReported <- as.Date(lacrime1.df$DateReported, format = "%m/%d/%Y")
+lacrime1.df$DateOccurred <- as.Date(lacrime1.df$DateOccurred, format = "%m/%d/%Y")
+
+# convert Time Occurred into 24-hour time range
+lacrime1.df$TimeOccured <- ifelse(lacrime1.df$TimeOccured >= 100,round(lacrime1.df$TimeOccured/100),
+                       ifelse(lacrime1.df$TimeOccured <= 29,24,1))
+
+# convert categorical variables into factors
+lacrime1.df$AreaID <- as.factor(lacrime1.df$AreaID)
+lacrime1.df$AreaName <- as.factor(lacrime1.df$AreaName)
+lacrime1.df$ReportingDistrict <- as.factor(lacrime1.df$ReportingDistrict)
+lacrime1.df$PremiseCode <- as.factor(lacrime1.df$PremiseCode)
+lacrime1.df$PremiseDesc <- as.factor(lacrime1.df$PremiseDesc)
+
+lacrime1.df$StatusCode[lacrime1.df$StatusCode == 'CC' | lacrime1.df$StatusCode == 'TH'] <- 'UNK'
+lacrime1.df$StatusCode <- as.factor(lacrime1.df$StatusCode)
+lacrime1.df$StatusDesc <- as.factor(lacrime1.df$StatusDesc)
+
+# victims whose sex are neither Female nor Male are categorized as Unknown
+lacrime1.df$VictimSex[lacrime1.df$VictimSex != 'F'& lacrime1.df$VictimSex != 'M'] <- 'Unknown'
+lacrime1.df$VictimSex[lacrime1.df$VictimSex == 'F'] <- 'Female'
+lacrime1.df$VictimSex[lacrime1.df$VictimSex == 'M'] <- 'Male'
+lacrime1.df$VictimSex <- as.factor(lacrime1.df$VictimSex)
+
+# Victim descent are categorized into 7 common categories
+lacrime1.df$VictimDescent[lacrime1.df$VictimDescent == '-'] <- 'X'
+lacrime1.df$VictimDescent[lacrime1.df$VictimDescent == 'A'|lacrime1.df$VictimDescent == 'C'|
+                            lacrime1.df$VictimDescent =='D'|lacrime1.df$VictimDescent == 'F'|
+                            lacrime1.df$VictimDescent =='J'|lacrime1.df$VictimDescent =='K'|
+                            lacrime1.df$VictimDescent =='L'|lacrime1.df$VictimDescent == 'V'|
+                            lacrime1.df$VictimDescent =='Z'] <- 'Asian'
+lacrime1.df$VictimDescent[lacrime1.df$VictimDescent == 'B'] <- 'Black/African American'
+lacrime1.df$VictimDescent[lacrime1.df$VictimDescent == 'I'] <- 'American Indian/Alaskan Native'
+lacrime1.df$VictimDescent[lacrime1.df$VictimDescent =='G'| lacrime1.df$VictimDescent =='O'|
+                          lacrime1.df$VictimDescent =='P'| lacrime1.df$VictimDescent =='S'|
+                          lacrime1.df$VictimDescent =='U'] <- 'Native Hawaiian/Other Pacific Islander'
+lacrime1.df$VictimDescent[lacrime1.df$VictimDescent == 'H'] <- 'Hispanic/Latino'
+lacrime1.df$VictimDescent[lacrime1.df$VictimDescent == 'W'] <- 'White'
+lacrime1.df$VictimDescent[lacrime1.df$VictimDescent == 'X'] <- 'Unknown'
+lacrime1.df$VictimDescent <- as.factor(lacrime1.df$VictimDescent)
+lacrime1.df$VictimDescent <- factor(lacrime1.df$VictimDescent, ordered = TRUE, 
+                                  levels=c("American Indian/Alaskan Native",'Asian',
+                                           'Black/African American', 'Hispanic/Latino',
+                                           'Native Hawaiian/Other Pacific Islander','White','Unknown'))
+
+# convert latitude and longtitude as continuous variables
+lacrime1.df$Latitude <- as.numeric(lacrime1.df$Latitude)
+lacrime1.df$Longitude <- as.numeric(lacrime1.df$Longitude)
+
+# remove the observations which victim ages are less than 0
+lacrime1.df$VictimAge[lacrime1.df$VictimAge <=0] <- NA
+lacrime1.df$VictimAge <- as.numeric(lacrime1.df$VictimAge)
+lacrime1.df <- na.omit(lacrime1.df[,-7])
+```
+
+####2.5 Create new variables    
+__CrimeCategory Variable__  
+There are 138 levels of crime codes in the originally dataset. While exploring the dataset, I found some of the crimes are same in the big category, so I created a new variable to convert crime codes into 21 general categories. The crime codes that do not occur frequently are categorized as 'Other crime'.    
+  
+_--- 21 levels of the general categories_  
+```{r crimecategory, echo = FALSE}
+lacrime1.df$CrimeCategory[lacrime1.df$CrimeCodeDesc =="ASSAULT WITH DEADLY WEAPON, AGGRAVATED ASSAULT"| 
+                            lacrime1.df$CrimeCodeDesc == "INTIMATE PARTNER - AGGRAVATED ASSAULT"] <- 'Aggravated Assault'
+lacrime1.df$CrimeCategory[lacrime1.df$CrimeCodeDesc =="BURGLARY FROM VEHICLE"| 
+                            lacrime1.df$CrimeCodeDesc == "BURGLARY"] <- 'Burglary'
+lacrime1.df$CrimeCategory[lacrime1.df$CrimeCodeDesc =="CHILD ABUSE (PHYSICAL) - SIMPLE ASSAULT"| 
+                            lacrime1.df$CrimeCodeDesc == "CRM AGNST CHLD (13 OR UNDER) (14-15 & SUSP 10 YRS OLDER)"| 
+                            lacrime1.df$CrimeCodeDesc == "CHILD ANNOYING (17YRS & UNDER)"| 
+                            lacrime1.df$CrimeCodeDesc == "CHILD NEGLECT (SEE 300 W.I.C.)"| 
+                            lacrime1.df$CrimeCodeDesc == "CHILD ABUSE (PHYSICAL) - AGGRAVATED ASSAULT"| 
+                            lacrime1.df$CrimeCodeDesc == "CHILD STEALING"| 
+                            lacrime1.df$CrimeCodeDesc == "LEWD/LASCIVIOUS ACTS WITH CHILD"| 
+                            lacrime1.df$CrimeCodeDesc == "CHILD PORNOGRAPHY"| 
+                            lacrime1.df$CrimeCodeDesc == "CHILD ABANDONMENT"| 
+                            lacrime1.df$CrimeCodeDesc == "DISRUPT SCHOOL"| 
+                            lacrime1.df$CrimeCodeDesc == "ABORTION/ILLEGAL"] <- 'Child Crime'
+lacrime1.df$CrimeCategory[lacrime1.df$CrimeCodeDesc =="DOCUMENT FORGERY / STOLEN FELONY"| 
+                            lacrime1.df$CrimeCodeDesc == "EXTORTION"| 
+                            lacrime1.df$CrimeCodeDesc == "UNAUTHORIZED COMPUTER ACCESS"| 
+                            lacrime1.df$CrimeCodeDesc == "BUNCO, ATTEMPT"| 
+                            lacrime1.df$CrimeCodeDesc == "CREDIT CARDS, FRAUD USE ($950.01 & OVER)"| 
+                            lacrime1.df$CrimeCodeDesc == "COUNTERFEIT"| 
+                            lacrime1.df$CrimeCodeDesc == "ILLEGAL DUMPING"| 
+                            lacrime1.df$CrimeCodeDesc == "DOCUMENT WORTHLESS ($200.01 & OVER)"| 
+                            lacrime1.df$CrimeCodeDesc == "CREDIT CARDS, FRAUD USE ($950 & UNDER"| 
+                            lacrime1.df$CrimeCodeDesc == "DISHONEST EMPLOYEE - PETTY THEFT"| 
+                            lacrime1.df$CrimeCodeDesc == "DISHONEST EMPLOYEE - GRAND THEFT"| 
+                            lacrime1.df$CrimeCodeDesc == "CONSPIRACY"| 
+                            lacrime1.df$CrimeCodeDesc == "DOCUMENT WORTHLESS ($200 & UNDER)"| 
+                            lacrime1.df$CrimeCodeDesc == "BRIBERY"| 
+                            lacrime1.df$CrimeCodeDesc == "REPLICA FIREARMS(SALE,DISPLAY,MANUFACTURE OR DISTRIBUTE)"| 
+                            lacrime1.df$CrimeCodeDesc == "DISHONEST EMPLOYEE ATTEMPTED THEFT"] <- 'Commercial Crime'
+lacrime1.df$CrimeCategory[lacrime1.df$CrimeCodeDesc =="DISTURBING THE PEACE"| 
+                            lacrime1.df$CrimeCodeDesc == "INCITING A RIOT"| 
+                            lacrime1.df$CrimeCodeDesc == "BLOCKING DOOR INDUCTION CENTER"] <- "Disturbing the Peace"
+lacrime1.df$CrimeCategory[lacrime1.df$CrimeCodeDesc =="DRUGS, TO A MINOR"| 
+                            lacrime1.df$CrimeCodeDesc == "DRUNK ROLL"| 
+                            lacrime1.df$CrimeCodeDesc == "DRUNK ROLL - ATTEMPT"] <- "Drugs/Drunk"
+lacrime1.df$CrimeCategory[lacrime1.df$CrimeCodeDesc =="CRIMINAL HOMICIDE"| 
+                            lacrime1.df$CrimeCodeDesc == "ARSON"] <- 'Criminal Homicide/Arson'
+lacrime1.df$CrimeCategory[lacrime1.df$CrimeCodeDesc =="HUMAN TRAFFICKING - COMMERCIAL SEX ACTS"| 
+                            lacrime1.df$CrimeCodeDesc == "HUMAN TRAFFICKING - INVOLUNTARY SERVITUDE"] <- 'Human Trafficking'
+lacrime1.df$CrimeCategory[lacrime1.df$CrimeCodeDesc =="KIDNAPPING"| 
+                            lacrime1.df$CrimeCodeDesc == "KIDNAPPING - GRAND ATTEMPT"] <- 'Kidnapping'
+lacrime1.df$CrimeCategory[lacrime1.df$CrimeCodeDesc =="OTHER MISCELLANEOUS CRIME"| 
+                            lacrime1.df$CrimeCodeDesc == "OTHER ASSAULT"| 
+                            lacrime1.df$CrimeCodeDesc == "STALKING"| 
+                            lacrime1.df$CrimeCodeDesc == "FALSE IMPRISONMENT"| 
+                            lacrime1.df$CrimeCodeDesc == "CRUELTY TO ANIMALS"| 
+                            lacrime1.df$CrimeCodeDesc == "CONTRIBUTING"| 
+                            lacrime1.df$CrimeCodeDesc == "FALSE POLICE REPORT"| 
+                            lacrime1.df$CrimeCodeDesc == "PANDERING"| 
+                            lacrime1.df$CrimeCodeDesc == "TELEPHONE PROPERTY - DAMAGE"| 
+                            lacrime1.df$CrimeCodeDesc == "BIGAMY"| 
+                            lacrime1.df$CrimeCodeDesc == "LYNCHING"| 
+                            lacrime1.df$CrimeCodeDesc == "FAILURE TO DISPERSE"| 
+                            lacrime1.df$CrimeCodeDesc == "LYNCHING - ATTEMPTED"| 
+                            lacrime1.df$CrimeCodeDesc == "MANSLAUGHTER, NEGLIGENT"] <- 'Other Crime'
+lacrime1.df$CrimeCategory[lacrime1.df$CrimeCodeDesc =="ROBBERY"| 
+                            lacrime1.df$CrimeCodeDesc == "ATTEMPTED ROBBERY"] <- 'Robbery'
+lacrime1.df$CrimeCategory[lacrime1.df$CrimeCodeDesc =="BATTERY WITH SEXUAL CONTACT"| 
+                            lacrime1.df$CrimeCodeDesc == "RAPE, FORCIBLE"| 
+                            lacrime1.df$CrimeCodeDesc == "SEX,UNLAWFUL(INC MUTUAL CONSENT, PENETRATION W/ FRGN OBJ"| 
+                            lacrime1.df$CrimeCodeDesc == "INDECENT EXPOSURE"| 
+                            lacrime1.df$CrimeCodeDesc == "SEXUAL PENETRATION W/FOREIGN OBJECT"| 
+                            lacrime1.df$CrimeCodeDesc == "ORAL COPULATION"| 
+                            lacrime1.df$CrimeCodeDesc == "LEWD CONDUCT"| 
+                            lacrime1.df$CrimeCodeDesc == "SODOMY/SEXUAL CONTACT B/W PENIS OF ONE PERS TO ANUS OTH"| 
+                            lacrime1.df$CrimeCodeDesc == "PEEPING TOM"| 
+                            lacrime1.df$CrimeCodeDesc == "RAPE, ATTEMPTED"| 
+                            lacrime1.df$CrimeCodeDesc == "PIMPING"| 
+                            lacrime1.df$CrimeCodeDesc == "BEASTIALITY, CRIME AGAINST NATURE SEXUAL ASSLT WITH ANIM"| 
+                            lacrime1.df$CrimeCodeDesc == "INCEST (SEXUAL ACTS BETWEEN BLOOD RELATIVES)"] <- 'Sexual Crime'
+lacrime1.df$CrimeCategory[lacrime1.df$CrimeCodeDesc =="BATTERY - SIMPLE ASSAULT"| 
+                            lacrime1.df$CrimeCodeDesc == "INTIMATE PARTNER - SIMPLE ASSAULT"| 
+                            lacrime1.df$CrimeCodeDesc == "BATTERY POLICE (SIMPLE)"| 
+                            lacrime1.df$CrimeCodeDesc == "ASSAULT WITH DEADLY WEAPON ON POLICE OFFICER"] <- 'Simple Assault' 
+lacrime1.df$CrimeCategory[lacrime1.df$CrimeCodeDesc =="CRIMINAL THREATS - NO WEAPON DISPLAYED"| 
+                            lacrime1.df$CrimeCodeDesc == "LETTERS, LEWD  -  TELEPHONE CALLS, LEWD"| 
+                            lacrime1.df$CrimeCodeDesc == "THREATENING PHONE CALLS/LETTERS"] <- 'Threats'    
+lacrime1.df$CrimeCategory[lacrime1.df$CrimeCodeDesc =="THROWING OBJECT AT MOVING VEHICLE"| 
+                            lacrime1.df$CrimeCodeDesc == "DRIVING WITHOUT OWNER CONSENT (DWOC)"| 
+                            lacrime1.df$CrimeCodeDesc == "FAILURE TO YIELD"| 
+                            lacrime1.df$CrimeCodeDesc == "RECKLESS DRIVING"] <- 'Traffic Violation'        
+lacrime1.df$CrimeCategory[lacrime1.df$CrimeCodeDesc =="TRESPASSING"] <- 'Trespassing'
+lacrime1.df$CrimeCategory[lacrime1.df$CrimeCodeDesc =="VANDALISM - FELONY ($400 & OVER, ALL CHURCH VANDALISMS)"| 
+                            lacrime1.df$CrimeCodeDesc == "VANDALISM - MISDEAMEANOR ($399 OR UNDER)"] <- 'Vandalism'
+lacrime1.df$CrimeCategory[lacrime1.df$CrimeCodeDesc =="VIOLATION OF COURT ORDER"| 
+                            lacrime1.df$CrimeCodeDesc == "CONTEMPT OF COURT"] <- 'Violation of Court Order' 
+lacrime1.df$CrimeCategory[lacrime1.df$CrimeCodeDesc =="VIOLATION OF RESTRAINING ORDER"| 
+                            lacrime1.df$CrimeCodeDesc == "VIOLATION OF TEMPORARY RESTRAINING ORDER"| 
+                            lacrime1.df$CrimeCodeDesc == "RESISTING ARREST"] <- 'Violation of Restraining Order'
+lacrime1.df$CrimeCategory[lacrime1.df$CrimeCodeDesc =="BRANDISH WEAPON"| 
+                            lacrime1.df$CrimeCodeDesc == "SHOTS FIRED AT INHABITED DWELLING"| 
+                            lacrime1.df$CrimeCodeDesc == "DISCHARGE FIREARMS/SHOTS FIRED"| 
+                            lacrime1.df$CrimeCodeDesc == "BOMB SCARE"| 
+                            lacrime1.df$CrimeCodeDesc == "BATTERY ON A FIREFIGHTER"| 
+                            lacrime1.df$CrimeCodeDesc == "SHOTS FIRED AT MOVING VEHICLE, TRAIN OR AIRCRAFT"| 
+                            lacrime1.df$CrimeCodeDesc == "WEAPONS POSSESSION/BOMBING"| 
+                            lacrime1.df$CrimeCodeDesc == "FIREARMS RESTRAINING ORDER (FIREARMS RO)"| 
+                            lacrime1.df$CrimeCodeDesc == "FIREARMS TEMPORARY RESTRAINING ORDER (TEMP FIREARMS RO)"] <- 'Weapon'
+lacrime1.df$CrimeCategory[is.na(lacrime1.df$CrimeCategory)] <- 'Theft/Stolen/Burglary'
+lacrime1.df$CrimeCategory <- as.factor(lacrime1.df$CrimeCategory)
+levels(lacrime1.df$CrimeCategory)
+
+lacrime1.df$CrimeCode <- as.factor(lacrime1.df$CrimeCode)
+lacrime1.df$CrimeCodeDesc <- as.factor(lacrime1.df$CrimeCodeDesc)
+```
+
+__AgeCategory Variable__  
+The victime ages are categorized into 5 age categories from children to senior adults.  
+  
+_--- 5 levels of the Victime Age category_  
+```{r agecategory, echo = FALSE}
+lacrime1.df$AgeCategory <- ifelse(lacrime1.df$VictimAge <=14, 'Children(0-14)',
+                                  ifelse(lacrime1.df$VictimAge <= 24, 'Youth(15-24)',
+                                         ifelse(lacrime1.df$VictimAge <= 44, 'Young Adult(25-44)',
+                                                ifelse(lacrime1.df$VictimAge <= 65, 'Adult(45-65)',
+                                                'Senior(65 and over)'))))
+lacrime1.df$AgeCategory <- as.factor(lacrime1.df$AgeCategory) 
+lacrime1.df$AgeCategory <- factor(lacrime1.df$AgeCategory, ordered = TRUE, 
+                                  levels=c("Children(0-14)",'Youth(15-24)',
+                                           'Young Adult(25-44)', 'Adult(45-65)',
+                                           'Senior(65 and over)'))
+levels(lacrime1.df$AgeCategory)
+```
+
+__YearMonth Variable__  
+YearMonth variable are formatted as the first day (01) of the year and month (yyyy-mm) when crime occurred. This variable is used to create a time series later in data exploration.  
+_e.g. yyyy-mm-01_  
+```{r yearmonth, echo = FALSE}
+# yyyy-mm-dd
+lacrime1.df$YearMonth <- paste(substr(lacrime1.df$DateOccurred,1,8),'01',sep = "")
+```
+
+__MonthofCrime Variable__  
+Created a new variable which represents the month of crime occurred. e.g. Jul  
+```{r crimeofmonth, echo = FALSE}
+lacrime1.df$MonthOfCrime =  month.abb[month(ymd(lacrime1.df$DateOccurred))]
+lacrime1.df$MonthOfCrime <- factor(lacrime1.df$MonthOfCrime, ordered = TRUE, 
+                                  levels=c("Jan",'Feb', 'Mar', 'Apr','May','Jun','Jul',
+                                           'Aug','Sep','Oct','Nov','Dec'))
+```
+
+__DayofCrime Variable__  
+Created a new variable which represents the weekday of the crimes occurred. e.g. Mon  
+```{r crimeofday, echo = FALSE}
+lacrime1.df$DayOfCrime =  wday(ymd(lacrime1.df$DateOccurred),label = TRUE)
+```
+
+__Other Variables__   
+The three new variables are used to create graphs and interactive shiny app.  
+```{r othervar, echo=TRUE}
+axis_hist <- c("Year" = "DateOccurred",
+               "Time" = "TimeOccured",
+               "Victim Age" = "VictimAge")
+
+axis_bar <- c("Victim Sex" = "VictimSex",
+              "Status" = "StatusDesc",
+              "Month" = "MonthOfCrime",
+               "Weekday" = "DayOfCrime",
+              "Victim Race" = "VictimDescent")
+
+axis_bar2 <- c("Area" = "AreaName",
+                "Crime Category (general)" = "CrimeCategory",
+               "Crime Category (small class)" = "CrimeCodeDesc",
+                "Premise Type" = "PremiseDesc")
+```
+***
+__View the cleansed data__  
+After cleansed the dataset, a total of 1601178 rows and 23 variables left in the dataset.  
+```{r cleansed, echo = FALSE}
+head(lacrime1.df)
+#View(lacrime1.df)
+
+#write.csv(lacrime1.df,file = "la.csv")
+```
+***
+```{r theme, echo = FALSE}
+theme_update(plot.title = element_text(hjust = 0.5,family='', face='bold', size=12))
+theme_update(plot.subtitle = element_text(hjust = 0.5, size = 10))
+```
+
+###3. EDA    
+####3.1 Crimes Occurred during 2010-2019  
+```{r dateoccurred, echo = FALSE}
+ggplot(lacrime1.df)+
+      geom_histogram(aes(x = DateOccurred), binwidth = 1, fill = '#FF3399')+
+      labs(title="Crime in Los Angeles (2010-2019)")+
+      xlab("Year")+ ylab("Number of Crimes")
+```
+The graph plotted all the crimes occurred during 2010-2019. We can see that there are some day such as the beginning of 2013 and 2014, the number of crimes are much higher than others, and there seems to have some pattern in the graph. In order to explore if there are regular pattern for crimes, I plotted time-series plots in the following chunk.   
+  
+_Use 5. Shiny App to see interactive plots._  
+
+####3.2 Time-Series Plot   
+#####3.2.1 Time Plot  
+```{r time-series, echo = FALSE}
+# create a time series in a frequency of 12 month
+df <- as.data.frame(table(lacrime1.df$YearMonth))
+lacrime.ts <- ts(df$Freq, start = c(2010,1), end = c(2019,3), freq = 12)
+
+#Time Plot
+autoplot(lacrime.ts)+
+  ylab("Number of Crimes") + xlab("Year(Crime Occurred)") +
+  ggtitle("Crime in Los Angeles 2010-2019")
+```
+From the time plot, we can find that there is a dig in the beginning of each year which means the crime numbers decreased in the first one or two months every year. Following the dig, there is immediately an increase in the following month. The crimes happened has a decrease from 2010 to 2013, and then there was an increase in the following years from 2014 to 2018. Also, there is a huge decrease from 2018 to the beginning of 2019. According to the graph, the plot seems to have seasonality, however, it's not very clearly in this graph.  
+
+#####3.2.2 Seasonal Plot  
+```{r time-series2, echo = FALSE}
+#Seasonal Plot
+ggseasonplot(lacrime.ts, year.labels=TRUE, year.labels.left=TRUE) +
+    ylab("Number of Crimes") +
+    theme_classic() +
+    ggtitle("Seasonal plot: Crime in Los Angeles")
+
+#Polar Seasonal Plot
+ggseasonplot(lacrime.ts, polar=TRUE) +
+  ylab("Number of Crimes") +
+  ggtitle("Polar seasonal plot: Crime in Los Angeles")
+```
+From the two seasonal plots above, we can summarize that there was a seasonal pattern in the dataset, crimes decreased in month January, March, May, October, and increased in month Feburary, April, June, September, November and December for most of the year.  
+
+####3.3 Histograms  
+#####3.3.1 Time
+```{r time, warning=FALSE, echo = FALSE}
+ggplot(lacrime1.df)+
+    geom_histogram(aes(x = TimeOccured), binwidth = 1, fill = 'lightblue')+
+    labs(title="Number of Crimes Occurred - Time(hrs)")+
+    xlab("Time")+ ylab("Number of Crimes")+
+    scale_y_continuous(labels = scales::comma)
+
+lacrime1.df %>%
+  filter(TimeOccured == 12) %>%
+  group_by(CrimeCodeDesc) %>%
+  summarise(CountIncidents = n()) %>%
+  arrange(desc(CountIncidents)) %>%
+  mutate(CrimeCodeDesc = reorder(CrimeCodeDesc,CountIncidents)) %>%
+  head(10) %>%
+  ggplot(aes(x = CrimeCodeDesc,y = CountIncidents)) +
+    geom_bar(stat='identity', fill = c("yellow1")) +
+    geom_text(aes(x = CrimeCodeDesc, y = 1, label = CountIncidents),
+              vjust=-0.5, size = 4) +
+    labs(x = 'Crime Type', y = 'Count of Crimes', 
+         title = 'Type of Crime at 12 am') +
+    scale_x_discrete(labels = function(x) str_wrap(x, width = 10))+
+    theme(text = element_text(size = 9))
+```
+Most of the crimes occurred at __12:00 am__, the number of crimes are almost twice as many as the average of other time periods. Crimes are less likely to happen between 3 am to 7 am, with a least occurring frequency at 5 am. Crimes happened from the 1 pm to the midnight are more likely to happen than that in morning from 1 am to 11 am.  
+
+As 12am is the time that most of the crimes committed, I plotted a chart to see what are the crime types that committed most in this time period. We observed that __Theft of Identity__ is the most common crime type at 12am.  
+
+_Use 5. Shiny App to see interactive plots._   
+
+#####3.3.2 Victim Age
+```{r victimage, echo = FALSE}
+ggplot(lacrime1.df)+
+    geom_histogram(aes(x = VictimAge), binwidth = 1, fill = 'coral1')+
+    labs(title="Number of Crimes Occurred among Victim Age")+
+    xlab("Victime Age")+ ylab("Number of Crimes")
+```
+Most of the crimes happened among people from 25 to 50 years old. People aged around 25 years old are most likely to be targeted during 2010-2019. It's a right skewed histogram, so the average age is greater than the median age.  
+
+_Use 5. Shiny App to see interactive plots._   
+
+#####3.3.3 Age Category
+```{r agecat, warning=FALSE, echo = FALSE}
+ggplot(lacrime1.df)+
+    geom_histogram(aes(x = AgeCategory), stat="count", binwidth = 1, fill = 'coral1')+
+    geom_text(aes(x = AgeCategory,label=..count..), stat='count',check_overlap = TRUE, position=position_dodge(0.9),vjust=-0.3)+
+    labs(title="Number of Crimes Occurred among Victim Age Category")+
+    xlab("Age")+ ylab("Number of Crimes")+
+    scale_y_continuous(labels = scales::comma)
+```
+Young adults is the group that most likely to be targeted. `r round(727811/1601178*100,digits=2)`% of the crimes occurred on young adults. Children are the least likely to be attacked group. `r round(50955/1601178*100,digits=2)`% of the crimes occurred on children. `r round((282426+727811+444709)/1601178*100,digits=2)`% of the crimes occurred in Youth group, young adult group, and adult group.  
+
+####3.4 Boxplot  
+#####3.4.1 Age distribution among Victime race, gender and time  
+```{r boxplot, echo = FALSE}
+ggplot(lacrime1.df)+
+  geom_boxplot(aes(x=VictimDescent, y = VictimAge, fill=VictimDescent), outlier.color = 'firebrick2', alpha = 0.6)+
+  xlab("Victim Descent")+ylab("Victim Age")+
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 10))+
+  scale_fill_manual(values = rainbow(7))
+
+ggplot(lacrime1.df)+
+  geom_boxplot(aes(x=VictimSex, y = VictimAge, fill=VictimSex), outlier.color = 'firebrick2', alpha = 0.6)+
+  xlab("Victim Sex")+ylab("Victim Age")+
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 10))+
+  scale_fill_manual(values = rainbow(3))
+
+ggplot(lacrime1.df)+
+  geom_boxplot(aes(x=factor(TimeOccured), y = VictimAge, fill=TimeOccured), outlier.color = 'firebrick2')+
+  xlab("Time")+ylab("Victim Age")+
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 10))
+```
+From the three boxplots above, it's very clear that most of the crimes occurred on people aged between 25 years old to 50 years old.  
+
+From the first boxplot, we can find that the average victim age of White people is the highest among all the 7 race categories, it's over 40 years old. The average victim age for Asian and Native Hawaiian/Other Pacific Islander, Black/African American is around 37 years old. The average victim of Hispanic/Latino people is around 35 years old, a little bit younger than the previous mentioned groups. The averge victim age of American Indian/Alaskan Native is the lowest which is around 27 years old except the Unknown group.   
+  
+From the second boxplot, we can find that the average victime age of Male is a little bit higher than that of Female. However, the average age for the two groups are all near 37 years old.  
+  
+From the third boxplot, we can find that the average victim age increased from 24 pm to 10 am and then has a decrease trend from 12 am to 23 pm.  
+
+####3.5 Bar chart  
+#####3.5.1 Crime Distribution  
+```{r distribution, echo = FALSE}
+for (val in axis_bar) {
+    plot <- ggplot(lacrime1.df, aes_string(x = val)) +
+              geom_bar(stat = "count", position = "dodge", fill = "#cc33ff")+
+              geom_text(aes(label=..count..), stat='count',check_overlap = TRUE, position=position_dodge(0.9),vjust=-0.3)+
+              labs(title="Number of Crimes")+
+              xlab(names(axis_bar)[axis_bar == val])+
+              ylab("Number of Crimes")+
+              scale_x_discrete(labels = function(x) str_wrap(x, width = 10))+
+              scale_y_continuous(labels = scales::comma)
+    print(plot)
+}
+```
+From the first graph, we can see that crimes occurred on female are more than that on male. The difference is `r round((805376-791048)/805376*100,digits=2)`%.  
+  
+From the second graph, `r round(1211224/1601178*100,digits=2)`% of the crimes are still under investigation. `r round((164027+12049)/1601178*100,digits=2)`% of the criminals were arrested, among those criminals, `r round(164027/(164027+12049)*100,digits=2)`% are adult criminals.  
+  
+From the third graph, we can find January, March have the highest crimes, November has the lowest crimes. From the fourth graph, Friday has the highest crimes. However, the difference is not very big.  
+  
+From the fifth graph, we can find that among the 7 race categories, `r round(645976/1601178*100,digits=2)`% of the crimes occurred on Hispanic/Latino. White group has a `r round(430161/1601178*100,digits=2)`% which is the second highest group. Then Black/African American `r round(302998/1601178*100,digits=2)`%, Native Hawaiian/Other Pacific Islander `r round(151528/1601178*100,digits=2)`%, Asian `r round(57179/1601178*100,digits=2)`%, American Indian/Alaskan Native `r round(804/1601178*100,digits=2)`%, Other races `r round(12532/1601178*100,digits=2)`%.  
+
+_According to the 2010 Census, the racial composition of the city was:_  
+
+_White alone, not Hispanic or Latino: 26.2%_  
+_Black or African American: 9.0%_  
+_American Indian and Alaska Native: 1.4%_   
+_Asian: 15.3%_  
+_Native Hawaiian and Other Pacific Islander: 0.4%_  
+_Two or more races: 3.0%_  
+_Hispanic or Latino: 48.6%_   
+
+_Information retrieved from https://www.census.gov/quickfacts/fact/table/losangelescountycalifornia,ca/POP010210. _  
+
+Here is the table which compared the demographic rate with the infringement rate:  
+
+Race                                   | Demographic% | Infringement%
+-------------------------------------- | -----------  | ------
+White alone, not Hispanic or Latino    | 26.2%        | `r round(430161/1601178*100,digits=2)`%
+Black or African American              | 9.0%         |`r round(302998/1601178*100,digits=2)`%
+American Indian and Alaska Native      | 1.4%         |`r round(804/1601178*100,digits=2)`%
+Asian                                  | 15.3%        |`r round(57179/1601178*100,digits=2)`%
+Native Hawaiian and Other Pacific Islander| 0.4%      |`r round(151528/1601178*100,digits=2)`%
+Hispanic or Latino                     | 48.6%        | `r round(645976/1601178*100,digits=2)`%
+
+
+```{r line, echo = FALSE}
+race <- c('White alone','Black/African American','American Indian/Alaska Native','Asian','Native Hawaiian/Other Pacific Islander','Hispanic/Latino')
+demo <- c(26.2, 9.0, 1.4, 15.3, 0.4, 48.6)
+vicRate <- c(26.87, 18.92, 0.05, 3.57, 9.46, 40.34)
+
+new1 <- data.frame(race,demo,vicRate)
+
+ggplot(new1, aes(x=demo, y = vicRate))+
+  geom_point()+
+  xlab('Demographic%')+ylab('Infringement%')+
+  labs(title="Comparison of Demographic Rate and Infringement Rate")+
+  geom_abline(slope=1, intercept = 0, color='red')+
+  geom_text(label=new1$race, vjust = -0.5, nudge_x = 0.05,hjust=0.1)
+```
+We can find that compared with the demopraphic rate, Black/African American, Native Hawaiian/other Pacific Islander, and White are more likely to be targeted as a victim compared with respective demographic rate. Asian, American Indian/Alaska Native, and Hispanic/Latino are less likely to be targeted as a victim compared with respective demographic rate.  
+
+#####3.5.2 Victim distribution by Gender - Race  
+```{r gender, echo = FALSE}
+ggplot(lacrime1.df, aes(x=VictimDescent,fill=VictimSex))+
+  geom_bar(position = "dodge",alpha = 0.7)+
+  geom_text(aes(label=..count..),stat='count',check_overlap = TRUE, position=position_dodge(0.9),vjust=-0.3)+
+  labs(title = "Victim distribution by Gender - Race")+
+  xlab("Victim Race")+ylab("Count")+
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 10))+
+  scale_y_continuous(labels = scales::comma)+
+  scale_fill_manual(values = rainbow(3))
+```
+From this bar chart, we find that Female of Black/Arican American, Hispanic/Latino are more likely to be targeted as a victim compared with Male of respective race group, however, Male of Native Hawaiian/Other Pacific Islander, White, and American Indian/Alaskan Native are more likely to be targeted as a victim compared with Male of respective race group.  
+
+#####3.5.3 Victim distribution by Gender - Area  
+```{r areaname, echo = FALSE}
+ggplot(lacrime1.df, aes(x=AreaName, fill=VictimSex))+
+  geom_bar(position = "dodge",alpha = 0.7)+
+  labs(title = "Victim distribution by Gender - Area")+
+  xlab("Area Name")+ylab("Count")+
+  scale_y_continuous(labels = scales::comma)+
+  scale_fill_manual(values = rainbow(3))+
+  theme(text = element_text(size = 10), axis.text.x = element_text(angle=45))
+```
+From the above bar chart, we can find that in area 77th Street, Rampart, Southeast, there is much larger probibility that female would be targeted compared with male. In area Central, Hollenbeck, Southwest, male has a much larger probability who will be targeted as a victim than female.  
+
+#####3.5.4 Top 10 Most Dangerous Indicators  
+```{r top10, echo = FALSE}
+for (val in axis_bar2) {
+  top <- lacrime1.df[,c(val),with=FALSE]
+  df <- as.data.frame(table(top))
+  
+  plot<- df %>%
+          arrange(desc(Freq)) %>%
+          slice(1:10) %>%
+          ggplot(., aes(x=top, y=Freq))+
+            geom_bar(stat='identity', fill = "orange")+
+            xlab(names(axis_bar2)[axis_bar2 == val])+
+            ylab("Number of Crimes")+
+            labs(title = paste("Top 10 ",names(axis_bar2)[axis_bar2 == val]),
+                subtitle = paste("The most dangerous ",tolower(names(axis_bar2)[axis_bar2 == val]), "s Crimes Occurred during 2010-2019", sep = ""))+
+            scale_x_discrete(labels = function(x) str_wrap(x, width = 10))+
+            scale_y_continuous(labels = scales::comma)+
+            theme(text = element_text(size = 10))
+  print(plot)
+}
+
+```
+The above four bar charts represent the top 10 areas/crime categories (general)/crime categories (small class)/premise types that crimes happened mostly in the past 10 years.  
+  
+Among the 21 areas, 77th Street, and Southwest are the two areas crimes would occur more than other places.  
+  
+Among the 21 general crime categories, Theft/stolen/burglary is the criminal behavior most prone to take place. Child crime, sexual crime are ranked the top 9th and 8th crime category among the 21 categories which should be emphasized as well.  
+  
+Among the small classes of the crimes, battery-simple assault is the No.1 crime that occurred in the past 10 years.  
+  
+The top 3 places where crimes happened are single family dwelling, street, multi-unit dwelling.  
+
+#####3.5.5 Sex and Crime Description  
+```{r sexcrime, echo = FALSE}
+lacrime1.df %>%
+  group_by(VictimSex,CrimeCodeDesc) %>%
+  tally() %>%
+  ungroup() %>%
+  mutate(VictimSex = reorder(VictimSex,n)) %>%
+  arrange(desc(n)) %>%
+  head(10) %>%
+  ggplot(aes(x = VictimSex,y = n,fill = CrimeCodeDesc)) +
+    geom_bar(stat='identity') +
+    labs(x = 'Sex and Crime Description', y = 'Count of Incidents', 
+         title = 'Count of Incidents and Sex and Crime Description') +
+    scale_y_continuous(labels = scales::comma)+
+    theme_bw() 
+```
+This is a graph that plotted the top 10 crime types for female and male in total.  
+We observe for Female we have the Category _Intimate Partner - Simple Assault_ which we do not have for Male. And Male have the category _Assault with deadly weapon, aggravated assault_ which we do not have for Female. Theft Plain - Petty($950&UNDER), Battery-Simple Assault, and Burglary from vehicle are three important crime types commited for both Female and Male.  
+
+#####3.5.6 Premise Description and Crime Description  
+```{r premise, echo = FALSE}
+lacrime1.df %>%
+  group_by(PremiseDesc,CrimeCodeDesc) %>%
+  tally() %>%
+  ungroup() %>%
+  mutate(PremiseDesc = reorder(PremiseDesc,n)) %>%
+  arrange(desc(n)) %>%
+  head(10) %>%
+  ggplot(aes(x = PremiseDesc,y = n, fill =CrimeCodeDesc)) +
+    geom_bar(stat='identity') +
+    labs(x = 'Premise Description and Crime Description', y = 'Count of Incidents', 
+         title = 'Count of Incidents and Premise Description and Crime Description') +
+    scale_x_discrete(labels = function(x) str_wrap(x, width = 10))+
+    scale_y_continuous(labels = scales::comma)+
+    theme(text = element_text(size = 10))
+
+```
+This is a graph that plotted the top 10 crime types for the top 5 premise types.  
+We observed that Intimate Partner-simple assault is the most frequent committed crimes in a single family dwelling premise. Burglary from vehicle is an important crime types committed in open places such as street and parking lot.    
+  
+####3.6 Map  
+Here is a map plotted the 21 areas in Los Angeles. 77th Street, Southwest, and Southeast which are the top 3 most dangerous areas we have discovered in the previous charts are located in the center of Los Angeles.  
+```{r map, echo = FALSE}
+ggplot(lacrime1.df, aes(x=Longitude, y= Latitude))+
+  geom_point(aes(color=AreaName))
+```
+
+###4. Models   
+The dataset has been sampled to include only 100,000 entries for the modelling. The variables with high correlations are dropped from the dataset.   
+```{r subset, echo = FALSE}
+set.seed(111)
+laSub <- sample_n(lacrime1.df, 100000)
+
+#drop variables have high correlations
+la1 <- laSub[,c(-1,-2,-3,-5,-7,-8,-12,-13,-15,-16,-20,-21)]
+```
+
+####4.1 Naive Bayers  
+For Naive Bayers model, only categorical variables can be used to build the model. The continuous variables were dropped. The dataset was splitted into training and validation dataset. The model was created to classify __Victim Sex__.  
+```{r naive, echo = FALSE}
+nb <- la1[, c("TimeOccured","AreaName","VictimSex","VictimDescent","StatusCode",
+              "CrimeCategory","MonthOfCrime","DayOfCrime")]
+nb$TimeOccured <- as.factor(nb$TimeOccured)
+
+set.seed(123)
+train1.index <- createDataPartition(nb$VictimSex,p=0.8,list = FALSE)
+train1.df <- nb[train1.index,]
+valid1.df <- nb[-train1.index,]
+
+la.nb <- naiveBayes(VictimSex ~ ., data = train1.df)
+la.nb
+```
+From the results, we can find the probabilities of victim to be a Female, Male or Unknown gender under different conditions. 
+Take DayofCrime as an example, on Sunday, the probability the victim is a female is 13.57%, the probability the victim is a male is 13.83%, the probability of Unknown gender is 13.04%.  
+
+```{r predictions, echo = FALSE}
+# probabilities
+pred.prob <- predict(la.nb, newdata = valid1.df, type = "raw")
+# class membership
+pred.class <- predict(la.nb, newdata = valid1.df)
+
+df.pred <- data.frame(actual = valid1.df$VictimSex, predicted = pred.class, pred.prob)
+```
+
+__Performace Evaluation__
+```{r perfEval, echo = FALSE}
+confusionMatrix(pred.class, valid1.df$VictimSex)
+```
+
+####4.2 Regressions  
+I converted four variables (AreaName, CrimeCategory, MonthOfCrime, DayOfCrime) that have too many levels into dummy variables for performance efficiency. The dataset was splitted into training and validation dataset by 8:2.
+```{r training, echo = FALSE}
+#convert multiple level categorical variable into dummy variables
+dummys <- fastDummies::dummy_cols(la1, select_columns = c("AreaName", "CrimeCategory",
+                                                           "MonthOfCrime", "DayOfCrime"))
+#convert into factors for the dummy variables
+for (i in c(12:72)){
+  dummys[,i] <- as.factor(dummys[,i])
+}
+
+#dataset used for build models
+la2 <- dummys[,c(-2,-9,-10,-11)]  #drop variables which has been converted to dummy variables
+train.index <- createDataPartition(la2$VictimSex, p = 0.8, list = FALSE)
+la.train <- la2[train.index,]
+la.valid <- la2[-train.index,]
+```
+
+We do a Cross Validation using 10 folds, repeat for 5 times. Three regression models were built to compare performance in order to select the best model to predict __Victim Age__.    
+```{r crossvalidation, echo = FALSE}
+tr <- trainControl(method = "repeatedcv", 
+                          number = 10, repeats = 5,
+                          verboseIter = TRUE) 
+```
+
+#####4.2.1 Ridge Regression  
+The ridge regression will penalize the coefficients, those who are the least efficient in estimation will "shrink" the fastest. Naturally those who are more important will take more of the budget. As lambda is increased, the budget will "decrease", and penalizing more. The ridge regression keeps all the features, it not allow you to select features.   
+```{r ridge, results='hide', echo = FALSE}
+ridgeReg <- train(VictimAge ~., la.train, method = 'glmnet', 
+                  tuneGrid = expand.grid(alpha = 0,           
+                                         lambda = seq(0.0001,0.5, length = 5)),   
+                  trControl = tr)
+```
+
+```{r ridgeplot, echo = FALSE}
+print(ridgeReg)
+
+plot(ridgeReg)
+plot(ridgeReg$finalModel, xvar = 'lambda', label = TRUE, lwd = 1.5)
+plot(varImp(ridgeReg, scale = TRUE), top=20)
+```
+The MSE vs lambda plot is used to choose the best lambda, when the RMSE is the smallest. Alpha = 0 (feature for ridge regression), lambda = 0.25005 was selected by the model by applying a grid search.  
+In the second graph, coefficient such as 49, 57 shrinked to zero very fast which means they are less important than other coefficients.  
+Graph 3 listed the top 20 most important factors when predicting the victim age. __CrimeCategory_Child Crime__ is the most important one among the 20 factors. __AreaName_Hollenbeck1__ is the least important one among the 20 factors.    
+
+#####4.2.2 Lasso Regression  
+The lasso regression will also penalize the coefficients. Lasso regression will drop features which are not useful to improve prediction accuracy.   
+```{r lasso, results='hide', echo = FALSE}
+lassoReg <- train(VictimAge ~., la.train, method = 'glmnet', 
+                  tuneGrid = expand.grid(alpha = 1,            
+                                         lambda = seq(0.0001, 0.05, length = 5)),    
+                  trControl = tr)    
+```
+
+```{r lassoplot, echo = FALSE}
+print(lassoReg)
+
+plot(lassoReg)
+plot(lassoReg$finalModel, xvar = 'lambda', label = TRUE, lwd = 1.5)
+plot(varImp(lassoReg, scale = TRUE), top = 20)
+```
+Alpha = 1 (feature for lasso regression), lambda = 0.012575 was selected by the model by applying a grid search.  
+In the second graph, coefficient 49, 57 shrinked to zero very fast which means they are less important than other coefficients.  
+Graph 3 listed the top 20 most important factors when predicting the victim age. __CrimeCategory_Child Crime__ is the most important one among the 20 factors. __CrimeCategory_Disturbing the Peace__ is the least important one among the 20 factors which is different from that of ridge regression.  
+
+#####4.2.3 Elastic-Net Regression  
+Elastic-Net regression combines Ridge and Lasso regression penalties to generate a better model.  
+```{r elasticnet, results='hide', echo = FALSE}
+enetReg <- train(VictimAge ~., la.train, method = 'glmnet', 
+                  tuneGrid = expand.grid(alpha = seq(0,1,length = 10),                    
+                                         lambda = seq(0.0001, 0.05, length = 10)),    
+                  trControl = tr)   
+print(enetReg)
+```
+
+```{r elasplt, echo = FALSE}
+  # print best-tuned results
+enetReg$bestTune
+
+ # plot results
+plot(enetReg)  # alpha - mixing parameter, lambda - regularization parameter
+plot(enetReg$finalModel, xvar = 'lambda', lwd =1.4, label=TRUE)
+plot(varImp(enetReg, scale = TRUE),top=20)
+```
+Alpha = 0.3333333, lambda = 0.02782222 was selected by the model by applying a grid search. The combinations of alpha and lambda can be find in the Mixing percentage and RMSE plot.  
+In the second graph, coefficient 49, 57 shrinked to zero very fast which means they are less important than other coefficients.  
+Graph 3 listed the top 20 most important factors when predicting the victim age. __CrimeCategory_Child Crime__ is the most important one among the 20 factors. __CrimeCategory_Disturbing the Peace__ is the least important one among the 20 factors.  
+
+#####4.2.4 Compare Models
+```{r comparemodels, echo = FALSE}
+  # create a list of above models
+model_list <- list(Ridge = ridgeReg, 
+                   Lasso = lassoReg, 
+                   ElasticNet = enetReg)
+compare <- resamples(model_list)
+  # Compare summary of models
+summary(compare)
+  # Plot errors from two of the three above models
+xyplot(compare, model = c("Ridge", "Lasso"), 
+       metric = 'RMSE')
+```
+We can find from the summary, the RMSE for Elastic-Net regresstion is the smallest, and Rsquared is the largest for Elastic-Net regression which means the model can explain more of the information than another two models. Therefore, the ElasticNet Model should be used to predict the victim age after comparison.  
+In the chart, Ridge regression has a higher RMSE if the point lies above the dotted line and Lasso has a higher RMSE if the point lies below the dotted line.  
+
+####4.3 Decision Tree  
+The decision tree model is used to classify the __Victim Race__ under specific conditions.  
+```{r decisiontree, echo = FALSE}
+default.ct <- rpart(VictimDescent ~ ., data = la.train, method = "class")
+options(scipen = 999)
+prp(default.ct, type = 1, extra = 1, under = TRUE, split.font = 2, varlen = -10)
+```
+The model has chosen Longitude as root node. For example, from the above decision tree, it can be inferred that if Longitude < -118 and Latitude >= 34, then the Victim will be a Hispanic/Latino.  
+In a similar way, we can interpret the victim race in other nodes.  
+
+####4.4 Forecasting - Arima  
+```{r unitroottest, echo=TRUE}
+la.ts <- window(lacrime.ts,start=2010, end=c(2018,12))
+summary(ur.kpss(la.ts))
+
+ndiffs(la.ts)
+la.ts %>% diff() %>% ur.kpss() %>% summary()  
+```
+Without differencing, test-statistic > critical value (5pct), we reject the null hypothsis (data is stationary). As for ARIMA forecasting, the data should be stationary, so I checked there should be one difference to make the data stationary. After taking fisrt difference, test-statistic < critical value (5pct), so we do not reject null hypothesis (data is stationary).  
+
+```{r difference, echo = FALSE}
+a1 <- autoplot(la.ts) + ylab("count") + xlab("year")
+a2 <- ggAcf(la.ts)  
+b1 <- autoplot(diff(la.ts)) + ylab("count") + xlab("year")
+b2 <- ggAcf(diff(la.ts))  
+grid.arrange(a1,a2,b1,b2,nrow=2,ncol=2)
+```
+The data is stationary after taken one differencing as we can see from the charts above.  
+
+```{r arima, results='hide', echo = FALSE}
+#select model automatically
+(fit <- auto.arima(la.ts, seasonal = FALSE))
+
+# Force run all combinations
+fit2 <- auto.arima(la.ts, stepwise = FALSE,
+                   approximation = FALSE)
+```
+
+```{r arimasum, echo = FALSE}
+summary(fit)
+summary(fit2)
+checkresiduals(fit2)
+
+autoplot(lacrime.ts)+
+  autolayer(forecast(fit2,h=6),series = "Arima")+
+  xlab('Year')+ylab("Count of Crimes")+
+  ggtitle("Forecasts for Crimes in Los Angeles") +
+  guides(color=guide_legend(title="Forecast"))
+```
+The first model ARIMA(2,1,0) was selected automatically, RMSE = 738.4436, AICc = 1724.99. The second model ARIMA(0,1,1)(0,1,1)[12] is selected by running all the combination, RMSE = 384.6812, AICc = 1424.99. AICc and RMSE of __ARIMA(0,1,1)(0,1,1)[12]__ are much less than ARIMA(2,1,0), so the second model is better than the first one.  
+The residuals should be normal distributed, without variance, and without autocorrelation which we can observed from the graph Residuals from ARIMA(0,1,1)(0,1,1)[12].  
+The trend of the crimes committed in the first 6 months of 2019 in Los Angeles is represented in the second graph above.  
+The predicted numbers of the crimes of the first 6 months of 2019 are shown below:  
+
+```{r, result='asis', echo = FALSE}
+predictions = fit2 %>% forecast(h=6)
+predictionsValues = as.numeric(predictions$mean)
+
+dataSetCrimes = data.frame(Month = as.character(), CrimeCount = as.numeric())
+dataSetMonths = data.frame(c("Jan 2019",
+                             "Feb 2019",
+                             "Mar 2019",
+                             "Apr 2019",
+                             "May 2019",
+                             "Jun 2019"))
+dataSetCrimes = cbind(dataSetMonths,round(predictionsValues))
+colnames(dataSetCrimes) = c("Months","Predictions")
+datatable(dataSetCrimes, style="bootstrap", class="table-condensed", options = list(dom = 'tp',scrollX = TRUE))
+```
+
+###5. Shiny App  
+You can use the Shiny App to see interactive outputs.  
+```{r shiny}
+fluidPage(
+    titlePanel("Los Angeles Crime Visualizer 2010-2019"),
+
+    tabsetPanel(
+      tabPanel("Trend",
+        br(),
+        sidebarPanel(
+          sliderInput(inputId = "date", label = "Timeline:",
+                    min = min(as.numeric(substr(lacrime1.df$DateOccurred,1,4))),
+                    max = max(as.numeric(substr(lacrime1.df$DateOccurred,1,4))+1),
+                    value = c(2010,2020)),
+          hr(),
+          selectInput(inputId = "axis_h", label = "Select a variable:",
+                    choices = axis_hist,
+                    selected = "DateOccurred"),
+
+          sliderInput(inputId = "bin", label = "Number of Bins:",
+                    min = 5, max = 50, value = 10),
+
+          sliderInput(inputId = "binwidth", label = "Choose bin width:",
+                      min = 1, max = 20, value = 1)
+        ),
+        mainPanel(
+          plotOutput(outputId = "histplot")
+                      )
+      ),
+
+      tabPanel("Distribution",
+          br(),
+          sidebarPanel(
+            sliderInput(inputId = "date", label = "Timeline:",
+                    min = min(as.numeric(substr(lacrime1.df$DateOccurred,1,4))),
+                    max = max(as.numeric(substr(lacrime1.df$DateOccurred,1,4))+1),
+                    value = c(2010,2020)),
+
+            selectInput(inputId = "axis_b", label = "Select a variable:",
+                    choices = axis_bar,
+                    selected = "VictimDescent")
+          ),
+          mainPanel(
+            plotOutput(outputId = "barplot")
+          )
+          ),
+
+      tabPanel("Top 10",
+               br(),
+               sidebarPanel(
+                  selectInput(inputId = "top_10", label = "Select a variable:",
+                           choices = axis_bar2,
+                           selected = "VictimAge")
+                  ),
+               mainPanel(
+                 plotOutput(outputId = "barplot2")
+               )
+    )
+))
+```
+
+```{r server}
+      yr <- reactive({
+          minyear <- input$date[1]
+          maxyear <- input$date[2]
+
+          a <- as.numeric(substr(lacrime1.df$DateOccurred,1,4)) >= minyear & as.numeric(substr(lacrime1.df$DateOccurred,1,4)) < maxyear
+          pa <- lacrime1.df[a,]
+          })
+
+      theme_update(plot.title = element_text(hjust = 0.5,family='', face='bold', size=12))
+      theme_update(plot.subtitle = element_text(hjust = 0.5, size = 10))
+
+      output$histplot <- renderPlot({
+        ggplot(yr())+
+          geom_histogram(aes_string(x = input$axis_h), bins = input$bin, binwidth = input$binwidth, fill = '#FF3399')+
+          labs(title="Crime in Los Angeles",
+             subtitle = "Please select time range to see the Number of Crimes Occurred during that period.")+
+          xlab(names(axis_hist)[axis_hist==input$axis_h])+ ylab("Number of Crimes")
+        })
+
+
+      output$barplot <- renderPlot({
+        ggplot(data = yr(), aes_string(x = input$axis_b)) +
+          geom_bar(stat = "count", position = "dodge", fill = "darkorchid2")+
+          geom_text(aes(label=..count..), stat='count',position=position_dodge(0.9),vjust=-0.3)+
+          labs(title="Number of Crimes",
+               subtitle = "Please select a variable to see the Crime Distribution")+
+          xlab(names(axis_bar)[axis_bar == input$axis_b])+
+          ylab("Number of Crimes")+
+          scale_x_discrete(labels = function(x) lapply(strwrap(x, width = 6, simplify = FALSE), paste, collapse="\n"))
+       })
+
+
+      top10 <- reactive({
+        a <- lacrime1.df[, c(input$top_10),with=FALSE]
+        df <- as.data.frame(table(a))
+    })
+
+      output$barplot2 <- renderPlot({
+        top10() %>%
+          arrange(desc(Freq)) %>%
+          slice(1:10) %>%
+          ggplot(., aes(x=a, y=Freq))+
+            geom_bar(stat='identity', fill = "orange")+
+            xlab(names(axis_bar2)[axis_bar2 == input$top_10])+
+            ylab("Number of Crimes")+
+            labs(title = paste("Top 10 ",names(axis_bar2)[axis_bar2 == input$top_10],"- Crimes Occurred"),
+                subtitle = paste("The most dangerous ",tolower(names(axis_bar2)[axis_bar2 == input$top_10]), "s Crimes Occurred during 2010-2019", sep = ""))+
+            scale_x_discrete(labels = function(x) lapply(strwrap(x, width = 6, simplify = FALSE), paste, collapse="\n"))
+    })
+
+```
